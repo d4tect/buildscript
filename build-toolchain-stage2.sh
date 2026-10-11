@@ -139,6 +139,12 @@ echo -e "${TOOLCHAIN_STEM}Restoring the initial Clang configuration scripts from
 cp "${PREFIX}/bin/clang.cfg.stage1" "${PREFIX}/bin/clang.cfg" || fail_build
 cp "${PREFIX}/bin/clang++.cfg.stage1" "${PREFIX}/bin/clang++.cfg" || fail_build
 
+# clang-cpp only reads clang-cpp.cfg, not clang.cfg. Without it, clang-cpp has no
+# --sysroot and falls back to the host's /usr/include, which makes Newlib's
+# configure fail with 'C preprocessor ".../clang-cpp" fails sanity check'.
+# Point it at clang.cfg so both always use the same flags.
+echo "@clang.cfg" > "${PREFIX}/bin/clang-cpp.cfg" || fail_build
+
 # Make sure all required dependencies are installed, using a fresh build directory
 echo -e "${TOOLCHAIN_STEM}Checking if required dependencies are installed."
 rm -rf "build" >> "${BUILD_LOG}" 2>&1 || fail_build
