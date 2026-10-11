@@ -1,0 +1,90 @@
+name: Build OpenXeChain toolchain
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af || true
+          df -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld binutils git cmake make ninja-build python3 python3-yaml \
+            bzip2 gzip grep findutils sed tar unzip zip gawk zlib1g-dev build-essential
+
+      - name: Show host tool versions
+        run: |
+          clang --version
+          cmake --version
+          ninja --version
+          nproc
+          free -h
+
+      - name: Build toolchain
+        run: PREFIX=$GITHUB_WORKSPACE/openxechain PARALLEL=$(nproc) ./build-toolchain.sh
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
+
+      - name: Sanity test
+        run: |
+          unset C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH
+          TC=$GITHUB_WORKSPACE/openxechain/bin
+          "$TC/clang" --version
+          "$TC/clang" --version | grep -q ppc32-xbox360
+          mkdir -p "$RUNNER_TEMP/sanity"
+          cd "$RUNNER_TEMP/sanity"
+          printf 'int add(int a, int b)\n{\n    return a + b;\n}\n' > sanity.c
+          "$TC/clang" -c sanity.c -o sanity.o
+          test -s sanity.o
+          "$TC/synthxex" --help
+          df -h
+          du -sh "$GITHUB_WORKSPACE/openxechain"
+
+      - name: Full link test (informational)
+        continue-on-error: true
+        run: |
+          unset C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH
+          TC=$GITHUB_WORKSPACE/openxechain/bin
+          cd "$RUNNER_TEMP/sanity"
+          printf 'int main(void)\n{\n    return 0;\n}\n' > hello.c
+          "$TC/clang" -v hello.c -o hello.exe
+          "$TC/synthxex" -i hello.exe -o hello.xex
+          ls -l hello.exe hello.xex
+
+      - name: Package toolchain
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          XZ_OPT=-T0 tar -cJf openxechain-toolchain.tar.xz -C "$GITHUB_WORKSPACE" openxechain
+          sha256sum openxechain-toolchain.tar.xz > openxechain-toolchain.tar.xz.sha256
+          cat openxechain-toolchain.tar.xz.sha256
+          ls -lh openxechain-toolchain.tar.xz
+
+      - name: Upload toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: openxechain-toolchain
+          path: |
+            openxechain-toolchain.tar.xz
+            openxechain-toolchain.tar.xz.sha256
+          retention-days: 30
+          compression-level: 0
